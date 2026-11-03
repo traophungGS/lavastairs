@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lava Stairs</title>
+<style>
+:root{--bg:#f3e6d0;--fg:#3a2a1a;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#241a12;--fg:#f3e6d0}}
+:root[data-theme="dark"]{--bg:#241a12;--fg:#f3e6d0}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:"Trebuchet MS",Verdana,sans-serif;gap:12px}
+canvas{width:min(96vw,720px);aspect-ratio:454/326;border-radius:10px;touch-action:manipulation;display:block}
+.pad{display:grid;grid-template-columns:repeat(4,56px);gap:8px}
+.pad button{height:48px;font:bold 22px "Trebuchet MS",sans-serif;border:2px solid var(--fg);background:transparent;color:var(--fg);border-radius:8px}
+.pad button:active{background:var(--fg);color:var(--bg)}
+p{margin:0;font-size:14px;opacity:.8}
+</style>
+</head>
+<body>
+<canvas id="c" width="454" height="326"></canvas>
+<div class="pad"><button data-k="w">W</button><button data-k="a">A</button><button data-k="s">S</button><button data-k="d">D</button></div>
+<p>Press the key shown in NEXT KEY to climb. Outrun the lava. Space restarts.</p>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const W=454,H=326,SW=48,SH=40,PX=235,PY=222;
+const KEYS=['w','a','s','d'];
+let keyDelay=0,lastKey=null,step,score,key,lava,speed,camX,camY,state,t,best=0,shake=0,flash=0;
+
+function reset(){
+  step=0;score=0;lastKey=null;keyDelay=0;key=pick();lava=SH*-0+70;speed=22;
+  camX=gx(0);camY=gy(0);state='ready';t=0;shake=0;flash=0;
+}
+function pick(){let k;do{k=KEYS[Math.floor(Math.random()*4)]}while(k===lastKey&&Math.random()<.6);return k}
+function gx(i){return i*SW+SW/2}
+function gy(i){return -i*SH}
+
+function press(k){
+  if(state==='over'){return}
+  if(state==='ready')state='play';
+  if(!key)return;
+  if(k===key){
+    step++;score++;lastKey=key;key=null;keyDelay=0.35;speed=Math.min(22+score*1.1,80);
+    flash=1;
+  }else{
+    let n;do{n=KEYS[Math.floor(Math.random()*4)]}while(n===key);key=n;
+    lava-=0; // penalty: lava surges toward the player
+    lava=Math.max(lava-SH*0.7,gy(step)+4*0); shake=8;
+  }
+}
+addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  if(k===' '){e.preventDefault();if(state==='over')reset();return}
+  if(KEYS.includes(k)){e.preventDefault();press(k)}
+});
+document.querySelectorAll('.pad button').forEach(b=>b.addEventListener('pointerdown',e=>{e.preventDefault();state==='over'?reset():press(b.dataset.k)}));
+cv.addEventListener('pointerdown',()=>{if(state==='over')reset()});
+
+let last=performance.now();
+function loop(now){
+  const dt=Math.min((now-last)/1000,.05);last=now;t+=dt;
+  if(state==='play'){
+    lava-=speed*dt;
+    if(lava<=gy(step)){state='over';best=Math.max(best,score);shake=14}
+  }
+  if(keyDelay>0){keyDelay-=dt;if(keyDelay<=0)key=pick()}
+  camX+=(gx(step)-camX)*Math.min(1,dt*9);
+  camY+=(gy(step)-camY)*Math.min(1,dt*9);
+  shake*=.88;flash=Math.max(0,flash-dt*5);
+  draw();requestAnimationFrame(loop);
+}
+
+function draw(){
+  ctx.save();
+  // wall
+  ctx.fillStyle='#fbd9a0';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#f6cb8a';ctx.fillRect(0,0,W,H);
+  // wainscot
+  // windows (parallax)
+  const spacing=155;
+  for(let n=-1;n<5;n++){
+    const wx=((n*spacing-(camX*.6)%spacing)+spacing)%(spacing*5)-spacing*0.3;
+    const wy=70-((camY*.6)%260);
+    for(let r=-1;r<3;r++){drawWindow(wx,wy+r*260)}
+  }
+  const sx=(Math.random()-.5)*shake,sy=(Math.random()-.5)*shake;
+  ctx.translate(PX-camX+sx,PY-camY+sy);
+  // stairs
+  const i0=Math.floor((camX-PX)/SW)-2,i1=i0+Math.ceil(W/SW)+4;
+  ctx.beginPath();
+  ctx.moveTo(i0*SW,gy(i0)+900);
+  for(let i=i0;i<=i1;i++){ctx.lineTo(i*SW,gy(i));ctx.lineTo((i+1)*SW,gy(i))}
+  ctx.lineTo((i1+1)*SW,gy(i1)+900);ctx.closePath();
+  ctx.fillStyle='#8a6a34';ctx.fill();
+  ctx.beginPath();ctx.moveTo(i0*SW,gy(i0));
+  for(let i=i0;i<=i1;i++){ctx.lineTo(i*SW,gy(i));ctx.lineTo((i+1)*SW,gy(i))}
+  ctx.lineWidth=3.5;ctx.strokeStyle='#111';ctx.lineJoin='miter';ctx.stroke();
+  // player
+  drawMan(gx(step)-6,gy(step));
+  // lava
+  const lx0=camX-PX-20,lw=W+40;
+  ctx.beginPath();ctx.moveTo(lx0,lava+400);ctx.lineTo(lx0,lava);
+  for(let x=0;x<=lw;x+=8){ctx.lineTo(lx0+x,lava+Math.sin((lx0+x)/22+t*2.2)*3+Math.sin((lx0+x)/9-t*3)*1.5)}
+  ctx.lineTo(lx0+lw,lava+400);ctx.closePath();
+  ctx.fillStyle='#ff5a1a';ctx.fill();
+  ctx.fillStyle='#ff8a2a';
+  for(let k=0;k<9;k++){
+    const bx=lx0+((k*83+t*14)%lw),by=lava+10+(k*13%30);
+    ctx.beginPath();ctx.ellipse(bx,by,18+k%3*6,3.5,0,0,7);ctx.fill();
+  }
+  // bubbles
+  ctx.fillStyle='#ff7a22';ctx.strokeStyle='#c43a0a';ctx.lineWidth=1.5;
+  for(let k=0;k<4;k++){
+    const ph=(t*.5+k*.27)%1,bx=lx0+k*110+((k*37)%40)+20,r=7*Math.sin(ph*Math.PI);
+    if(r>.5){ctx.beginPath();ctx.arc(bx,lava+2,r,Math.PI,0);ctx.fill();ctx.stroke()}
+  }
+  ctx.restore();
+  // HUD
+  ctx.save();
+  ctx.fillStyle='#fff';ctx.strokeStyle='#fff';
+  roundRect(-10,-10,178,76,16);ctx.fill();
+  ctx.fillStyle='#111';ctx.font='bold 24px "Trebuchet MS",sans-serif';ctx.textBaseline='alphabetic';ctx.textAlign='left';
+  ctx.fillText('NEXT',6,26);ctx.fillText('KEY:',6,54);
+  ctx.fillStyle='#000';roundRect(72,4,84,50,10);ctx.fill();
+  ctx.lineWidth=2.5;ctx.strokeStyle='#fff';ctx.stroke();
+  ctx.fillStyle=flash>0?'#7fe0ff':'#2ea8e6';ctx.font='bold 38px "Trebuchet MS",sans-serif';ctx.textAlign='center';
+  ctx.fillText(key?key.toUpperCase():'',114,43);
+  ctx.fillStyle='#fff';ctx.strokeStyle='#222';ctx.lineWidth=4;ctx.font='bold 44px "Trebuchet MS",sans-serif';
+  ctx.strokeText(score,W/2+30,48);ctx.fillText(score,W/2+30,48);
+  if(state==='ready'||state==='over'){
+    ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(0,100,W,100);
+    ctx.fillStyle='#fff';ctx.font='bold 26px "Trebuchet MS",sans-serif';
+    ctx.fillText(state==='ready'?'Press the key to start':'Burned! Score '+score,W/2,142);
+    ctx.font='16px "Trebuchet MS",sans-serif';
+    ctx.fillText(state==='ready'?'W  A  S  D':'Best '+best+'  -  tap or press Space',W/2,172);
+  }
+  ctx.restore();
+}
+function drawWindow(x,y){
+  ctx.fillStyle='#f7d4b0';ctx.fillRect(x-4,y-8,76,10);
+  ctx.fillStyle='#fff';ctx.fillRect(x,y,68,122);
+  ctx.fillStyle='#9fd6e8';
+  for(let k=0;k<12;k++){ctx.fillRect(x+3,y+4+k*10,62,6)}
+  ctx.fillStyle='#f6c39a';ctx.fillRect(x-4,y+120,76,10);
+  ctx.strokeStyle='#e8a070';ctx.lineWidth=2;ctx.strokeRect(x-4,y-8,76,138);
+}
+function drawMan(x,y){
+  const bob=state==='play'?Math.sin(t*10)*1:0;
+  ctx.strokeStyle='#111';ctx.fillStyle='#fff';ctx.lineWidth=3;ctx.lineCap='round';
+  ctx.beginPath();ctx.moveTo(x,y-34);ctx.lineTo(x-6,y);ctx.moveTo(x,y-34);ctx.lineTo(x+7,y);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(x-5,y-66);ctx.lineTo(x-3,y-34);ctx.lineTo(x+6,y-34);ctx.lineTo(x+6,y-66);ctx.closePath();ctx.fill();ctx.stroke();
+  ctx.beginPath();ctx.moveTo(x-5,y-60);ctx.lineTo(x-10,y-38);ctx.moveTo(x+6,y-60);ctx.lineTo(x+12,y-40);ctx.stroke();
+  ctx.beginPath();ctx.arc(x,y-86+bob,20,0,7);ctx.fill();ctx.stroke();
+}
+function roundRect(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>
